@@ -1,6 +1,3 @@
-import streamlit as st
-
-st.title("Diseño completamente al azar (DCA)")
 from io import BytesIO
 from pathlib import Path
 import warnings
@@ -19,6 +16,13 @@ from utils.anova_utils import (
 	tabla_anova,
 	tukey,
 	validar_dca,
+)
+from utils.diagnostico_utils import (
+	grafico_qq,
+	grafico_residuos_vs_ajustados,
+	prueba_levene,
+	prueba_shapiro,
+	residuos_y_ajustados,
 )
 
 
@@ -144,7 +148,34 @@ f_critica = float(
 	distribucion_f.ppf(1 - alfa, gl_tratamientos, gl_error)
 )
 
-pestanas = st.tabs(["Datos", "ANOVA", "Comparaciones", "Gráficos"])
+# Los residuos e_ij = Y_ij - Y_estimado_ij permiten revisar el comportamiento del error.
+datos_residuos = residuos_y_ajustados(modelo)
+
+# Shapiro-Wilk evalúa normalidad y Levene con mediana evalúa igualdad de varianzas.
+shapiro_estadistico, shapiro_p, shapiro_conclusion = prueba_shapiro(
+	datos_residuos["Residuos"], alfa
+)
+levene_estadistico, levene_p, levene_conclusion = prueba_levene(
+	datos, columna_tratamiento, columna_respuesta, alfa
+)
+tabla_supuestos = pd.DataFrame(
+	[
+		{
+			"Prueba": "Shapiro-Wilk",
+			"Estadístico": shapiro_estadistico,
+			"p-valor": shapiro_p,
+			"Conclusión": shapiro_conclusion,
+		},
+		{
+			"Prueba": "Levene (centro: mediana)",
+			"Estadístico": levene_estadistico,
+			"p-valor": levene_p,
+			"Conclusión": levene_conclusion,
+		},
+	]
+)
+
+pestanas = st.tabs(["Datos", "ANOVA", "Comparaciones", "Gráficos", "Supuestos"])
 
 with pestanas[0]:
 	st.subheader("Datos del ensayo")
@@ -245,3 +276,37 @@ with pestanas[3]:
 	)
 	figura_medias.update_layout(showlegend=False)
 	st.plotly_chart(figura_medias, width="stretch")
+
+with pestanas[4]:
+	st.subheader("Residuos frente a valores ajustados")
+	st.plotly_chart(
+		grafico_residuos_vs_ajustados(modelo),
+		width="stretch",
+	)
+	st.subheader("Normalidad de los residuos")
+	st.plotly_chart(
+		grafico_qq(datos_residuos["Residuos"]),
+		width="stretch",
+	)
+
+	st.subheader("Pruebas de supuestos")
+	st.dataframe(
+		tabla_supuestos.style.format(
+			{
+				"Estadístico": "{:.4f}",
+				"p-valor": "{:.4f}",
+			}
+		),
+		hide_index=True,
+		width="stretch",
+	)
+
+	st.markdown(
+		"**Normalidad:** Shapiro-Wilk comprueba si los residuos son compatibles "
+		"con una distribución normal.\n\n"
+		"**Homogeneidad de varianzas:** Levene, centrada en la mediana, revisa si "
+		"la variabilidad de la respuesta es similar entre tratamientos.\n\n"
+		"**Independencia:** no se determina con Shapiro-Wilk ni con Levene. En un DCA "
+		"se sustenta en la asignación aleatoria de los tratamientos; también debe "
+		"revisarse que la toma de datos no haya introducido dependencia entre réplicas."
+	)
